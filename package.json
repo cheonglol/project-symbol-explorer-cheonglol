@@ -23,7 +23,7 @@
       },
       {
         "command": "project-symbol-explorer-cheonglol.toggleSymbolExplorer",
-        "title": "Toggle Project Symbol Explorer"
+        "title": "Open Project Symbol Explorer (Side Panel)"
       }
     ],
     "menus": {

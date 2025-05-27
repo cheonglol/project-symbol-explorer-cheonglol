@@ -31,19 +31,34 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   );
 
   return (
-    <div id="toolbar">
+    <div id="toolbar" aria-busy={loading}>
       <button
         id="themeBtn"
         className="theme-btn"
         aria-label="Toggle theme"
         onClick={onThemeToggle}
+        type="button"
       >
         🌓 Theme
       </button>
+      <label
+        htmlFor="viewSelect"
+        style={{
+          position: "absolute",
+          left: "-9999px",
+          width: 1,
+          height: 1,
+          overflow: "hidden",
+        }}
+      >
+        Select view mode
+      </label>
       <select
         id="viewSelect"
         value={view}
-        onChange={(e) => onViewChange((e.target as HTMLSelectElement).value)}
+        onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+          onViewChange(e.target.value)
+        }
         style={{ marginRight: "1em", minWidth: 90 }}
         aria-label="Select view mode"
       >
@@ -66,9 +81,31 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         {symbolCount} symbol{symbolCount === 1 ? "" : "s"}
       </span>
       {loading && (
-        <span id="loading" className="loading">⌛</span>
+        <span
+          id="loading"
+          className="loading"
+          aria-live="polite"
+          aria-label="Loading symbols"
+        >
+          <span aria-hidden="true">⌛</span>
+          <span
+            style={{
+              position: "absolute",
+              left: "-9999px",
+              width: 1,
+              height: 1,
+              overflow: "hidden",
+            }}
+          >
+            Loading symbols...
+          </span>
+        </span>
       )}
-      <span className="version-badge" title="Extension version" style={{ marginLeft: "auto" }}>
+      <span
+        className="version-badge"
+        title="Extension version"
+        style={{ marginLeft: "auto" }}
+      >
         v{version}
       </span>
     </div>
