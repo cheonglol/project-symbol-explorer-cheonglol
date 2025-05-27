@@ -8,7 +8,7 @@ interface Symbol {
   usedBy?: string[];
 }
 
-interface MindMapCanvasProps {
+interface SymbolGraphProps {
   symbols: Symbol[];
   kindMap: Record<string, string>;
   onReveal: (name: string) => void;
@@ -46,7 +46,7 @@ export function SymbolCard({ symbol, kindMap, onReveal }: SymbolCardProps) {
 }
 
 // Simple layout: root in center, children in a circle
-export function SymbolGraph({ symbols, kindMap, onReveal }: MindMapCanvasProps) {
+export function SymbolGraph({ symbols, kindMap, onReveal }: SymbolGraphProps) {
   if (!symbols.length) return null;
   // Pick the first symbol as root for demo
   const root = symbols[0];

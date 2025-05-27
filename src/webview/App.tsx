@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Toolbar } from "./Toolbar";
-import { SymbolGraph } from "./MindMapCanvas";
+import { SymbolGraph } from "./SymbolGraph";
 
 interface Symbol {
   name: string;
