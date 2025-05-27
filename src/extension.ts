@@ -1,60 +1,45 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import { minimatch } from 'minimatch';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
-
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
 	console.log('extension "project-symbol-explorer-cheonglol" is active');
 
 	const scanner = new SymbolScanner();
-	let panel: SymbolPanel | undefined;
 	let lastFilter = '';
-	let refreshTimeout: NodeJS.Timeout | undefined;
 	let isLoading = false;
 
-	async function refreshSymbols(debounce = 300) {
+	async function refreshSymbols(provider: SymbolViewProvider, debounce = 300) {
 		if (isLoading) { return; }
-		if (refreshTimeout) { clearTimeout(refreshTimeout); }
 		isLoading = true;
-		if (panel && panel.isVisible()) { panel.setLoading(true); }
-		refreshTimeout = setTimeout(async () => {
+		provider.setLoading(true);
+		setTimeout(async () => {
 			const symbols = await scanner.getAllSymbols();
-			if (panel) { panel.show(symbols, lastFilter); }
+			provider.show(symbols, lastFilter);
 			isLoading = false;
-			if (panel && panel.isVisible()) { panel.setLoading(false); }
+			provider.setLoading(false);
 		}, debounce);
 	}
 
-	// Listen for file and document changes
+	const provider = new SymbolViewProvider(context, (filter: string) => { lastFilter = filter; });
 	context.subscriptions.push(
-		vscode.workspace.onDidChangeTextDocument(() => refreshSymbols()),
-		vscode.workspace.onDidSaveTextDocument(() => refreshSymbols()),
-		vscode.workspace.onDidCreateFiles(() => refreshSymbols()),
-		vscode.workspace.onDidDeleteFiles(() => refreshSymbols())
+		vscode.window.registerWebviewViewProvider('projectSymbolExplorerView', provider, {
+			webviewOptions: { retainContextWhenHidden: true }
+		})
 	);
 
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	const disposable = vscode.commands.registerCommand('project-symbol-explorer-cheonglol.helloWorld', async () => {
-		const symbols = await scanner.getAllSymbols();
-		if (!panel) { panel = new SymbolPanel(context, (filter: string) => { lastFilter = filter; }); }
-		panel.show(symbols);
-	});
-	context.subscriptions.push(disposable);
-
-	// Register a command to toggle the symbol explorer view
-	const toggleDisposable = vscode.commands.registerCommand('project-symbol-explorer-cheonglol.toggleSymbolExplorer', async () => {
-		const symbols = await scanner.getAllSymbols();
-    if (isLoading) { return; } // Prevent multiple toggles while loading
-		if (!panel) { panel = new SymbolPanel(context, (filter: string) => { lastFilter = filter; }); }
-		panel.show(symbols);
-	});
-	context.subscriptions.push(toggleDisposable);
+	// Listen for file and document changes
+	context.subscriptions.push(
+		vscode.workspace.onDidChangeTextDocument(() => refreshSymbols(provider)),
+		vscode.workspace.onDidSaveTextDocument(() => refreshSymbols(provider)),
+		vscode.workspace.onDidCreateFiles(() => refreshSymbols(provider)),
+		vscode.workspace.onDidDeleteFiles(() => refreshSymbols(provider))
+	);
 }
 
 // This method is called when your extension is deactivated
@@ -70,17 +55,46 @@ export function deactivate() {}
 // 6. Add error handling and loading state
 
 class SymbolScanner {
+    private gitignorePatterns: string[] = [];
+    private gitignoreLoaded = false;
+
+    private loadGitignore(workspaceRoot: string) {
+        if (this.gitignoreLoaded) { return; }
+        const gitignorePath = path.join(workspaceRoot, '.gitignore');
+        if (fs.existsSync(gitignorePath)) {
+            const lines = fs.readFileSync(gitignorePath, 'utf-8')
+                .split(/\r?\n/)
+                .map(line => line.trim())
+                .filter(line => line && !line.startsWith('#'));
+            this.gitignorePatterns = lines;
+        }
+        this.gitignoreLoaded = true;
+    }
+
     async getAllSymbols(query: string = ""): Promise<{name: string, kind: number, containerName: string, usedBy?: string[]}[]> {
         try {
+            // Get workspace root
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            const workspaceRoot = workspaceFolders && workspaceFolders.length > 0 ? workspaceFolders[0].uri.fsPath : '';
+            if (workspaceRoot) { this.loadGitignore(workspaceRoot); }
+
             const symbols = await vscode.commands.executeCommand<any[]>(
                 'vscode.executeWorkspaceSymbolProvider', query
             );
             if (!Array.isArray(symbols)) { return []; }
-            // Filter to only project files (ts, js, tsx, jsx)
+            // Filter to only project files (ts, js, tsx, jsx) and not excluded by .gitignore
             const filteredSymbols = symbols.filter(s => {
                 if (!s.location || !s.location.uri) { return false; }
                 const file = s.location.uri.fsPath;
-                return /\.(ts|js|tsx|jsx)$/i.test(file) && !/node_modules/.test(file);
+                if (!/\.(ts|js|tsx|jsx)$/i.test(file)) { return false; }
+                // Exclude if matches any .gitignore pattern
+                if (this.gitignorePatterns.length > 0) {
+                    const relPath = workspaceRoot ? path.relative(workspaceRoot, file).replace(/\\/g, '/') : file;
+                    for (const pattern of this.gitignorePatterns) {
+                        if (minimatch(relPath, pattern, { dot: true })) { return false; }
+                    }
+                }
+                return true;
             });
             // Build a map of symbol name to symbol info
             const symbolMap = new Map<string, any>();
@@ -121,116 +135,105 @@ class SymbolScanner {
     }
 }
 
-class SymbolPanel {
-    private panel: vscode.WebviewPanel | undefined;
-    private lastSymbols: {name: string, kind: number, containerName: string, usedBy?: string[]}[] = [];
-    private lastFilter: string = '';
-    private loading: boolean = false;
-    private kindMap: Record<string, string> = {
-        0: 'File', 1: 'Module', 2: 'Namespace', 3: 'Package', 4: 'Class', 5: 'Method', 6: 'Property', 7: 'Field', 8: 'Constructor', 9: 'Enum', 10: 'Interface', 11: 'Function', 12: 'Variable', 13: 'Constant', 14: 'String', 15: 'Number', 16: 'Boolean', 17: 'Array', 18: 'Object', 19: 'Key', 20: 'Null', 21: 'EnumMember', 22: 'Struct', 23: 'Event', 24: 'Operator', 25: 'TypeParameter'
-    };
-    private version: string = 'dev';
-    constructor(private context: vscode.ExtensionContext, private onFilterChange?: (filter: string) => void) {
-        try {
-            this.version = this.context.extension.packageJSON.version || 'dev';
-        } catch (e) {}
-    }
+// SymbolViewProvider for side panel webview view
+class SymbolViewProvider implements vscode.WebviewViewProvider {
+	private _view?: vscode.WebviewView;
+	private lastSymbols: {name: string, kind: number, containerName: string, usedBy?: string[]}[] = [];
+	private lastFilter: string = '';
+	private loading: boolean = false;
+	private kindMap: Record<string, string> = {
+		0: 'File', 1: 'Module', 2: 'Namespace', 3: 'Package', 4: 'Class', 5: 'Method', 6: 'Property', 7: 'Field', 8: 'Constructor', 9: 'Enum', 10: 'Interface', 11: 'Function', 12: 'Variable', 13: 'Constant', 14: 'String', 15: 'Number', 16: 'Boolean', 17: 'Array', 18: 'Object', 19: 'Key', 20: 'Null', 21: 'EnumMember', 22: 'Struct', 23: 'Event', 24: 'Operator', 25: 'TypeParameter'
+	};
+	private version: string = 'dev';
+	constructor(private context: vscode.ExtensionContext, private onFilterChange?: (filter: string) => void) {
+		try {
+			this.version = this.context.extension.packageJSON.version || 'dev';
+		} catch (e) {}
+	}
 
-    public show(symbols: {name: string, kind: number, containerName: string, usedBy?: string[]}[], filter: string = '') {
-        this.lastSymbols = symbols;
-        this.lastFilter = filter;
-        if (!this.panel) {
-            this.panel = vscode.window.createWebviewPanel(
-                'projectSymbolExplorer',
-                'Project Symbol Explorer',
-                vscode.ViewColumn.Beside,
-                {
-                    enableScripts: true,
-                    retainContextWhenHidden: true,
-                    localResourceRoots: [vscode.Uri.file(this.context.extensionPath)]
-                }
-            );
-            this.panel.onDidDispose(() => this.panel = undefined, null, this.context.subscriptions);
-            this.panel.webview.onDidReceiveMessage(async msg => {
-                if (msg.command === 'getTheme') {
-                    this.panel?.webview.postMessage({
-                        command: 'setTheme',
-                        theme: vscode.window.activeColorTheme.kind
-                    });
-                } else if (msg.command === 'filter') {
-                    this.lastFilter = msg.query || '';
-                    if (this.onFilterChange) { this.onFilterChange(this.lastFilter); }
-                    this.sendData();
-                } else if (msg.command === 'reveal' && msg.name) {
-                    const symbol = this.lastSymbols.find(s => s.name === msg.name);
-                    if (symbol) {
-                        const all = await vscode.commands.executeCommand<any[]>(
-                            'vscode.executeWorkspaceSymbolProvider', symbol.name
-                        );
-                        if (Array.isArray(all)) {
-                            const match = all.find(s => s.name === symbol.name && s.kind === symbol.kind && (s.containerName || '') === (symbol.containerName || ''));
-                            if (match && match.location) {
-                                const doc = await vscode.workspace.openTextDocument(match.location.uri);
-                                const editor = await vscode.window.showTextDocument(doc, { preview: true });
-                                if (match.location.range) {
-                                    editor.revealRange(match.location.range, vscode.TextEditorRevealType.InCenter);
-                                    editor.selection = new vscode.Selection(match.location.range.start, match.location.range.end);
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-            this.panel.webview.html = this.getReactHtml();
-            // Send initial data after webview loads
-            setTimeout(() => this.sendData(), 100);
-        } else {
-            this.sendData();
-        }
-    }
+	public resolveWebviewView(webviewView: vscode.WebviewView) {
+		this._view = webviewView;
+		webviewView.webview.options = {
+			enableScripts: true,
+			localResourceRoots: [vscode.Uri.file(this.context.extensionPath)]
+		};
+		webviewView.webview.html = this.getReactHtml(webviewView.webview);
+		webviewView.webview.onDidReceiveMessage(async msg => {
+			if (msg.command === 'getTheme') {
+				webviewView.webview.postMessage({
+					command: 'setTheme',
+					theme: vscode.window.activeColorTheme.kind
+				});
+			} else if (msg.command === 'filter') {
+				this.lastFilter = msg.query || '';
+				if (this.onFilterChange) { this.onFilterChange(this.lastFilter); }
+				this.sendData();
+			} else if (msg.command === 'reveal' && msg.name) {
+				const symbol = this.lastSymbols.find(s => s.name === msg.name);
+				if (symbol) {
+					const all = await vscode.commands.executeCommand<any[]>(
+						'vscode.executeWorkspaceSymbolProvider', symbol.name
+					);
+					if (Array.isArray(all)) {
+						const match = all.find(s => s.name === symbol.name && s.kind === symbol.kind && (s.containerName || '') === (symbol.containerName || ''));
+						if (match && match.location) {
+							const doc = await vscode.workspace.openTextDocument(match.location.uri);
+							const editor = await vscode.window.showTextDocument(doc, { preview: true });
+							if (match.location.range) {
+								editor.revealRange(match.location.range, vscode.TextEditorRevealType.InCenter);
+								editor.selection = new vscode.Selection(match.location.range.start, match.location.range.end);
+							}
+						}
+					}
+				}
+			}
+		});
+		// Send initial data after webview loads
+		setTimeout(() => this.sendData(), 100);
+	}
 
-    public isVisible() {
-        return !!this.panel;
-    }
+	public show(symbols: {name: string, kind: number, containerName: string, usedBy?: string[]}[], filter: string = '') {
+		this.lastSymbols = symbols;
+		this.lastFilter = filter;
+		this.sendData();
+	}
 
-    public setLoading(loading: boolean) {
-        this.loading = loading;
-        this.sendData();
-    }
+	public setLoading(loading: boolean) {
+		this.loading = loading;
+		this.sendData();
+	}
 
-    private sendData() {
-        if (this.panel) {
-            this.panel.webview.postMessage({
-                command: 'data',
-                symbols: this.lastSymbols,
-                filter: this.lastFilter,
-                kindMap: this.kindMap,
-                version: this.version,
-                loading: this.loading
-            });
-        }
-    }
+	private sendData() {
+		if (this._view) {
+			this._view.webview.postMessage({
+				command: 'data',
+				symbols: this.lastSymbols,
+				filter: this.lastFilter,
+				kindMap: this.kindMap,
+				version: this.version,
+				loading: this.loading
+			});
+		}
+	}
 
-    private getReactHtml(): string {
-        const webview = this.panel!.webview;
-        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'webview.js'));
-        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'style.css'));
-        return `<!DOCTYPE html>
+	private getReactHtml(webview: vscode.Webview): string {
+		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'webview.js'));
+		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'style.css'));
+		return `<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Project Symbol Explorer</title>
-    <link rel="stylesheet" type="text/css" href="${styleUri}">
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Project Symbol Explorer</title>
+	<link rel="stylesheet" type="text/css" href="${styleUri}">
 </head>
 <body>
-    <div id="root"></div>
-    <script>
-    // Polyfill for VS Code API
-    window.acquireVsCodeApi = acquireVsCodeApi;
-    </script>
-    <script src="${scriptUri}"></script>
+	<div id="root"></div>
+	<script>
+	window.acquireVsCodeApi = acquireVsCodeApi;
+	</script>
+	<script src="${scriptUri}"></script>
 </body>
 </html>`;
-    }
+	}
 }

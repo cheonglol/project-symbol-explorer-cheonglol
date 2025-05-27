@@ -1,4 +1,31 @@
 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="3" y="3" width="18" height="18" rx="4" fill="#007ACC"/>
-  <path d="M8 8H16V10H8V8ZM8 12H16V14H8V12Z" fill="white"/>
+  <!-- Smaller central circuit circle -->
+  <circle cx="12" cy="12" r="3.5" stroke="black" stroke-width="1.5" fill="none"/>
+  <!-- Eight maximally spaced circuit lines and large nodes -->
+  <g stroke="black" stroke-width="1.3" fill="none">
+    <!-- Top -->
+    <polyline points="12,8.5 12,2"/>
+    <circle cx="12" cy="2" r="1.1" stroke="black" stroke-width="1.3" fill="none"/>
+    <!-- Top-right -->
+    <polyline points="14.47,9.53 19,5 22,2"/>
+    <circle cx="22" cy="2" r="1.1" stroke="black" stroke-width="1.3" fill="none"/>
+    <!-- Right -->
+    <polyline points="15.5,12 22,12"/>
+    <circle cx="22" cy="12" r="1.1" stroke="black" stroke-width="1.3" fill="none"/>
+    <!-- Bottom-right -->
+    <polyline points="14.47,14.47 19,19 22,22"/>
+    <circle cx="22" cy="22" r="1.1" stroke="black" stroke-width="1.3" fill="none"/>
+    <!-- Bottom -->
+    <polyline points="12,15.5 12,22"/>
+    <circle cx="12" cy="22" r="1.1" stroke="black" stroke-width="1.3" fill="none"/>
+    <!-- Bottom-left -->
+    <polyline points="9.53,14.47 5,19 2,22"/>
+    <circle cx="2" cy="22" r="1.1" stroke="black" stroke-width="1.3" fill="none"/>
+    <!-- Left -->
+    <polyline points="8.5,12 2,12"/>
+    <circle cx="2" cy="12" r="1.1" stroke="black" stroke-width="1.3" fill="none"/>
+    <!-- Top-left -->
+    <polyline points="9.53,9.53 5,5 2,2"/>
+    <circle cx="2" cy="2" r="1.1" stroke="black" stroke-width="1.3" fill="none"/>
+  </g>
 </svg>

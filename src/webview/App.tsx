@@ -1,5 +1,7 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Toolbar } from "./Toolbar";
+import { SymbolOutline } from "./SymbolOutline";
+import { SymbolTable } from "./SymbolTable";
 import { SymbolGraph } from "./SymbolGraph";
 
 interface Symbol {
@@ -17,19 +19,27 @@ interface AppProps {
   vscode: any;
 }
 
+const VIEWS = [
+  { value: "outline", label: "Outline" },
+  { value: "table", label: "Table" },
+  { value: "graph", label: "Graph" },
+];
+
 export function App({
-  initialSymbols = [],
-  initialFilter = "",
-  kindMap = {},
-  version = "dev",
+  initialSymbols,
+  initialFilter,
+  kindMap,
+  version,
   vscode,
 }: AppProps) {
   const [symbols, setSymbols] = useState<Symbol[]>(initialSymbols);
   const [filter, setFilter] = useState<string>(initialFilter);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(initialSymbols.length === 0);
+  const [view, setView] = useState<string>(VIEWS[0].value);
   const [zoom, setZoom] = useState<number>(1);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Message handler for VS Code events
   useEffect(() => {
     const handler = (event: MessageEvent) => {
       const {
@@ -50,7 +60,7 @@ export function App({
         case "data":
           setSymbols(newSymbols || []);
           setFilter(newFilter || "");
-          setLoading(!!isLoading);
+          setLoading(!!isLoading && (!newSymbols || newSymbols.length === 0));
           break;
         default:
           break;
@@ -61,6 +71,7 @@ export function App({
     return () => window.removeEventListener("message", handler);
   }, [vscode]);
 
+  // Handle ctrl+scroll for zoom
   useEffect(() => {
     const wheelHandler = (e: WheelEvent) => {
       if (e.ctrlKey) {
@@ -81,17 +92,60 @@ export function App({
     };
   }, []);
 
-  const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setFilter(value);
-    vscode.postMessage({ command: "filter", query: value });
-  };
-  const handleReveal = (name: string) =>
-    vscode.postMessage({ command: "reveal", name });
-  const handleThemeToggle = () => {
+  // Handlers
+  const handleFilterChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value;
+      setFilter(value);
+      vscode.postMessage({ command: "filter", query: value });
+    },
+    [vscode]
+  );
+
+  const handleReveal = useCallback(
+    (name: string) => vscode.postMessage({ command: "reveal", name }),
+    [vscode]
+  );
+
+  const handleThemeToggle = useCallback(() => {
     document.body.classList.toggle("dark");
     vscode.postMessage({ command: "getTheme" });
-  };
+  }, [vscode]);
+
+  const handleViewChange = useCallback((v: string) => setView(v), []);
+
+  // Memoize view component
+  const ViewComponent = useMemo(() => {
+    if (symbols.length === 0) return null;
+    switch (view) {
+      case "outline":
+        return (
+          <SymbolOutline
+            symbols={symbols}
+            kindMap={kindMap}
+            onReveal={handleReveal}
+          />
+        );
+      case "table":
+        return (
+          <SymbolTable
+            symbols={symbols}
+            kindMap={kindMap}
+            onReveal={handleReveal}
+          />
+        );
+      case "graph":
+        return (
+          <SymbolGraph
+            symbols={symbols}
+            kindMap={kindMap}
+            onReveal={handleReveal}
+          />
+        );
+      default:
+        return null;
+    }
+  }, [symbols, kindMap, handleReveal, view]);
 
   return (
     <>
@@ -100,10 +154,8 @@ export function App({
         onFilterChange={handleFilterChange}
         symbolCount={symbols.length}
         loading={loading}
-        zoom={zoom}
-        onZoomIn={() => setZoom((z) => Math.min(2, z + 0.1))}
-        onZoomOut={() => setZoom((z) => Math.max(0.5, z - 0.1))}
-        onResetZoom={() => setZoom(1)}
+        view={view}
+        onViewChange={handleViewChange}
         version={version}
         onThemeToggle={handleThemeToggle}
       />
@@ -117,13 +169,13 @@ export function App({
           display: "flex",
         }}
       >
-        {loading && (
+        {loading && symbols.length === 0 && (
           <div className="loading-overlay">
             <div className="spinner" />
             <div className="loading-text">Loading symbols...</div>
           </div>
         )}
-        {!loading && (
+        {(!loading || symbols.length > 0) && (
           <div
             id="container"
             ref={containerRef}
@@ -136,18 +188,12 @@ export function App({
               overflow: "visible",
             }}
           >
-            {symbols.length === 0 && (
+            {symbols.length === 0 && !loading && (
               <div className="no-results">
                 No symbols found{filter ? ` for "${filter}"` : "."}
               </div>
             )}
-            {symbols.length > 0 && (
-              <SymbolGraph
-                symbols={symbols}
-                kindMap={kindMap}
-                onReveal={handleReveal}
-              />
-            )}
+            {ViewComponent}
           </div>
         )}
       </div>
