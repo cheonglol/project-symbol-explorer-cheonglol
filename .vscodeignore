@@ -12,3 +12,5 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 **/.vscode-test.*
+# Do NOT ignore media/ so webview assets are included in VSIX
+!media/

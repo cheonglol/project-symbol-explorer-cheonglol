@@ -1,0 +1,71 @@
+.loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(255,255,255,0.8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.spinner {
+  border: 6px solid #f3f3f3;
+  border-top: 6px solid #3498db;
+  border-radius: 50%;
+  width: 48px;
+  height: 48px;
+  animation: spin 1s linear infinite;
+  margin-bottom: 16px;
+}
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+.loading-text {
+  font-size: 1.2em;
+  color: #333;
+}
+.mindmap-card {
+  background: rgba(255, 255, 255, 0.7);
+  border: 2px solid #b2bec3;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px 0 rgba(0,0,0,0.08);
+  padding: 8px 12px;
+  font-size: 1em;
+  font-family: inherit;
+  color: #222;
+  cursor: pointer;
+  transition: box-shadow 0.2s, border 0.2s;
+  backdrop-filter: blur(8px);
+  user-select: none;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  outline: none;
+}
+.mindmap-card.root {
+  border: 2.5px solid #0984e3;
+  background: rgba(9, 132, 227, 0.18);
+  color: #222;
+}
+.mindmap-card:focus, .mindmap-card:hover {
+  border: 2.5px solid #636e72;
+  box-shadow: 0 4px 24px 0 rgba(0,0,0,0.13);
+}
+.symbol-title {
+  font-weight: 700;
+  font-size: 1.1em;
+  margin-bottom: 2px;
+  letter-spacing: 0.01em;
+}
+.symbol-kind {
+  font-size: 0.95em;
+  color: #636e72;
+  font-weight: 400;
+}

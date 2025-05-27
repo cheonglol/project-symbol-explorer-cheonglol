@@ -2,7 +2,7 @@
   "name": "project-symbol-explorer-cheonglol",
   "displayName": "Project Symbol Explorer",
   "description": "A VS Code extension that scans the workspace for all types, classes, and symbols (TypeScript, extensible to other languages) and renders a visual display of all symbols and objects using VS Code APIs.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "Lester Cheong",
   "engines": {
     "vscode": "^1.100.0"
@@ -10,7 +10,10 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:project-symbol-explorer-cheonglol.toggleSymbolExplorer",
+    "onCommand:project-symbol-explorer-cheonglol.helloWorld"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
@@ -22,30 +25,71 @@
         "command": "project-symbol-explorer-cheonglol.toggleSymbolExplorer",
         "title": "Toggle Project Symbol Explorer"
       }
-    ]
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "project-symbol-explorer-cheonglol.toggleSymbolExplorer",
+          "when": "resourceLangId == typescript || resourceLangId == javascript || resourceLangId == tsx || resourceLangId == jsx",
+          "group": "navigation@100"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "projectSymbolExplorerContainer",
+          "title": "Project Symbols",
+          "icon": "media/symbol-explorer.svg"
+        }
+      ]
+    },
+    "views": {
+      "projectSymbolExplorerContainer": [
+        {
+          "id": "projectSymbolExplorerView",
+          "name": "Symbol Explorer"
+        }
+      ]
+    }
   },
   "scripts": {
-    "compile": "vsce package",
-    "watch": "webpack --watch",
-    "package": "webpack --mode production --devtool hidden-source-map",
+    "vscode:prepublish": "npm run build",
+    "build:webview": "webpack --config webpack.webview.config.js",
+    "watch:webview": "webpack --config webpack.webview.config.js --watch",
+    "build:ext": "webpack --config webpack.config.js",
+    "watch:ext": "webpack --config webpack.config.js --watch",
+    "build": "npm run build:webview && npm run build:ext",
+    "watch": "concurrently \"npm:watch:webview\" \"npm:watch:ext\"",
+    "compile": "npm run build",
+    "package": "npm run build && vsce package",
+    "dev": "npm run build && code .",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
-    "pretest": "npm run compile-tests && npm run package && npm run lint",
+    
+    "pretest": "npm run compile-tests && npm run build && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.100.0",
     "@types/mocha": "^10.0.10",
-    "@types/node": "20.x",
-    "@typescript-eslint/eslint-plugin": "^8.31.1",
-    "@typescript-eslint/parser": "^8.31.1",
-    "eslint": "^9.25.1",
-    "typescript": "^5.8.3",
-    "ts-loader": "^9.5.2",
-    "webpack": "^5.99.7",
-    "webpack-cli": "^6.0.1",
+    "@types/node": "22.x",
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.5",
+    "@types/vscode": "^1.100.0",
+    "@typescript-eslint/eslint-plugin": "^8.32.1",
+    "@typescript-eslint/parser": "^8.32.1",
     "@vscode/test-cli": "^0.0.10",
-    "@vscode/test-electron": "^2.5.2"
+    "@vscode/test-electron": "^2.5.2",
+    "concurrently": "^7.6.0",
+    "eslint": "^9.27.0",
+    "ts-loader": "^9.5.2",
+    "typescript": "^5.8.3",
+    "webpack": "^5.99.9",
+    "webpack-cli": "^6.0.1"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
   }
 }

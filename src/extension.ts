@@ -8,25 +8,50 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
 	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "project-symbol-explorer-cheonglol" is now active!');
+	console.log('extension "project-symbol-explorer-cheonglol" is active');
+
+	const scanner = new SymbolScanner();
+	let panel: SymbolPanel | undefined;
+	let lastFilter = '';
+	let refreshTimeout: NodeJS.Timeout | undefined;
+	let isLoading = false;
+
+	async function refreshSymbols(debounce = 300) {
+		if (isLoading) { return; }
+		if (refreshTimeout) { clearTimeout(refreshTimeout); }
+		isLoading = true;
+		if (panel && panel.isVisible()) { panel.setLoading(true); }
+		refreshTimeout = setTimeout(async () => {
+			const symbols = await scanner.getAllSymbols();
+			if (panel) { panel.show(symbols, lastFilter); }
+			isLoading = false;
+			if (panel && panel.isVisible()) { panel.setLoading(false); }
+		}, debounce);
+	}
+
+	// Listen for file and document changes
+	context.subscriptions.push(
+		vscode.workspace.onDidChangeTextDocument(() => refreshSymbols()),
+		vscode.workspace.onDidSaveTextDocument(() => refreshSymbols()),
+		vscode.workspace.onDidCreateFiles(() => refreshSymbols()),
+		vscode.workspace.onDidDeleteFiles(() => refreshSymbols())
+	);
 
 	// The command has been defined in the package.json file
 	// Now provide the implementation of the command with registerCommand
 	// The commandId parameter must match the command field in package.json
 	const disposable = vscode.commands.registerCommand('project-symbol-explorer-cheonglol.helloWorld', async () => {
-		const scanner = new SymbolScanner();
-		const panel = new SymbolPanel(context);
 		const symbols = await scanner.getAllSymbols();
+		if (!panel) { panel = new SymbolPanel(context, (filter: string) => { lastFilter = filter; }); }
 		panel.show(symbols);
 	});
-
 	context.subscriptions.push(disposable);
 
 	// Register a command to toggle the symbol explorer view
 	const toggleDisposable = vscode.commands.registerCommand('project-symbol-explorer-cheonglol.toggleSymbolExplorer', async () => {
-		const scanner = new SymbolScanner();
-		const panel = new SymbolPanel(context);
 		const symbols = await scanner.getAllSymbols();
+    if (isLoading) { return; } // Prevent multiple toggles while loading
+		if (!panel) { panel = new SymbolPanel(context, (filter: string) => { lastFilter = filter; }); }
 		panel.show(symbols);
 	});
 	context.subscriptions.push(toggleDisposable);
@@ -35,191 +60,176 @@ export function activate(context: vscode.ExtensionContext) {
 // This method is called when your extension is deactivated
 export function deactivate() {}
 
-class SymbolScanner {
-    async getAllSymbols(query: string = ""): Promise<vscode.SymbolInformation[]> {
-        // Only scan project files (ts, js, tsx, jsx)
-        const files = await vscode.workspace.findFiles('**/*.{ts,js,tsx,jsx}', '**/node_modules/**');
-        let allSymbols: vscode.SymbolInformation[] = [];
-        for (const file of files) {
-            const symbols = await vscode.commands.executeCommand<any[]>(
-                'vscode.executeDocumentSymbolProvider', file
-            );
-            if (Array.isArray(symbols)) {
-                this.flattenDocumentSymbols(symbols, allSymbols, file);
-            }
-        }
-        return allSymbols;
-    }
+// --- Drastic Refactor for Maintainability, Performance, and UX ---
 
-    private flattenDocumentSymbols(symbols: any[], result: vscode.SymbolInformation[], uri: vscode.Uri, containerName: string = "") {
-        for (const symbol of symbols) {
-            if (symbol && typeof symbol === 'object' && symbol.name) {
-                result.push({
-                    name: symbol.name,
-                    kind: symbol.kind,
-                    containerName,
-                    location: new vscode.Location(uri, symbol.range)
-                } as vscode.SymbolInformation);
-                if (Array.isArray(symbol.children) && symbol.children.length > 0) {
-                    this.flattenDocumentSymbols(symbol.children, result, uri, symbol.name);
+// 1. SymbolScanner: Use workspace symbol provider for performance, add filtering, and error handling
+// 2. SymbolPanel: Use a modern, accessible HTML UI with native scrolling, search/filter, and better state management
+// 3. Remove canvas-based rendering in favor of semantic HTML for accessibility and easier maintenance
+// 4. Add a search box for filtering symbols in the webview
+// 5. Use a table or list for symbol display
+// 6. Add error handling and loading state
+
+class SymbolScanner {
+    async getAllSymbols(query: string = ""): Promise<{name: string, kind: number, containerName: string, usedBy?: string[]}[]> {
+        try {
+            const symbols = await vscode.commands.executeCommand<any[]>(
+                'vscode.executeWorkspaceSymbolProvider', query
+            );
+            if (!Array.isArray(symbols)) { return []; }
+            // Filter to only project files (ts, js, tsx, jsx)
+            const filteredSymbols = symbols.filter(s => {
+                if (!s.location || !s.location.uri) { return false; }
+                const file = s.location.uri.fsPath;
+                return /\.(ts|js|tsx|jsx)$/i.test(file) && !/node_modules/.test(file);
+            });
+            // Build a map of symbol name to symbol info
+            const symbolMap = new Map<string, any>();
+            filteredSymbols.forEach(s => {
+                symbolMap.set(s.name, s);
+            });
+            // For each symbol, find who uses it (Used By)
+            const usedByMap: Record<string, Set<string>> = {};
+            for (const s of filteredSymbols) {
+                if (!s.location) { continue; }
+                const refs = await vscode.commands.executeCommand<any[]>(
+                    'vscode.executeReferenceProvider', s.location.uri, s.location.range.start
+                );
+                if (Array.isArray(refs)) {
+                    for (const ref of refs) {
+                        // Find which symbol this reference belongs to
+                        for (const other of filteredSymbols) {
+                            if (other.location &&
+                                other.location.uri.fsPath === ref.uri.fsPath &&
+                                other.location.range.contains(ref.range)) {
+                                if (!usedByMap[s.name]) { usedByMap[s.name] = new Set(); }
+                                usedByMap[s.name].add(other.name);
+                            }
+                        }
+                    }
                 }
             }
+            return filteredSymbols.map(s => ({
+                name: s.name,
+                kind: s.kind,
+                containerName: s.containerName || '',
+                usedBy: usedByMap[s.name] ? Array.from(usedByMap[s.name]) : []
+            }));
+        } catch (e: any) {
+            vscode.window.showErrorMessage('Failed to scan symbols: ' + (e && e.message ? e.message : String(e)));
+            return [];
         }
     }
 }
 
 class SymbolPanel {
     private panel: vscode.WebviewPanel | undefined;
-    constructor(private context: vscode.ExtensionContext) {}
+    private lastSymbols: {name: string, kind: number, containerName: string, usedBy?: string[]}[] = [];
+    private lastFilter: string = '';
+    private loading: boolean = false;
+    private kindMap: Record<string, string> = {
+        0: 'File', 1: 'Module', 2: 'Namespace', 3: 'Package', 4: 'Class', 5: 'Method', 6: 'Property', 7: 'Field', 8: 'Constructor', 9: 'Enum', 10: 'Interface', 11: 'Function', 12: 'Variable', 13: 'Constant', 14: 'String', 15: 'Number', 16: 'Boolean', 17: 'Array', 18: 'Object', 19: 'Key', 20: 'Null', 21: 'EnumMember', 22: 'Struct', 23: 'Event', 24: 'Operator', 25: 'TypeParameter'
+    };
+    private version: string = 'dev';
+    constructor(private context: vscode.ExtensionContext, private onFilterChange?: (filter: string) => void) {
+        try {
+            this.version = this.context.extension.packageJSON.version || 'dev';
+        } catch (e) {}
+    }
 
-    public show(symbols: vscode.SymbolInformation[]) {
+    public show(symbols: {name: string, kind: number, containerName: string, usedBy?: string[]}[], filter: string = '') {
+        this.lastSymbols = symbols;
+        this.lastFilter = filter;
         if (!this.panel) {
             this.panel = vscode.window.createWebviewPanel(
                 'projectSymbolExplorer',
                 'Project Symbol Explorer',
                 vscode.ViewColumn.Beside,
-                { enableScripts: true, retainContextWhenHidden: true }
+                {
+                    enableScripts: true,
+                    retainContextWhenHidden: true,
+                    localResourceRoots: [vscode.Uri.file(this.context.extensionPath)]
+                }
             );
             this.panel.onDidDispose(() => this.panel = undefined, null, this.context.subscriptions);
-            // Listen for theme changes
-            this.panel.webview.onDidReceiveMessage(message => {
-                if (message.command === 'getTheme') {
+            this.panel.webview.onDidReceiveMessage(async msg => {
+                if (msg.command === 'getTheme') {
                     this.panel?.webview.postMessage({
                         command: 'setTheme',
                         theme: vscode.window.activeColorTheme.kind
                     });
+                } else if (msg.command === 'filter') {
+                    this.lastFilter = msg.query || '';
+                    if (this.onFilterChange) { this.onFilterChange(this.lastFilter); }
+                    this.sendData();
+                } else if (msg.command === 'reveal' && msg.name) {
+                    const symbol = this.lastSymbols.find(s => s.name === msg.name);
+                    if (symbol) {
+                        const all = await vscode.commands.executeCommand<any[]>(
+                            'vscode.executeWorkspaceSymbolProvider', symbol.name
+                        );
+                        if (Array.isArray(all)) {
+                            const match = all.find(s => s.name === symbol.name && s.kind === symbol.kind && (s.containerName || '') === (symbol.containerName || ''));
+                            if (match && match.location) {
+                                const doc = await vscode.workspace.openTextDocument(match.location.uri);
+                                const editor = await vscode.window.showTextDocument(doc, { preview: true });
+                                if (match.location.range) {
+                                    editor.revealRange(match.location.range, vscode.TextEditorRevealType.InCenter);
+                                    editor.selection = new vscode.Selection(match.location.range.start, match.location.range.end);
+                                }
+                            }
+                        }
+                    }
                 }
             });
+            this.panel.webview.html = this.getReactHtml();
+            // Send initial data after webview loads
+            setTimeout(() => this.sendData(), 100);
+        } else {
+            this.sendData();
         }
-        this.panel.webview.html = this.getHtml(Array.isArray(symbols) ? symbols : []);
     }
 
-    private getHtml(symbols: vscode.SymbolInformation[]): string {
-        // Dynamically generate the HTML as a template string (no file read)
-        const symbolsJson = JSON.stringify(symbols.map(s => ({
-            name: s.name,
-            kind: s.kind,
-            containerName: s.containerName || '',
-        })));
+    public isVisible() {
+        return !!this.panel;
+    }
+
+    public setLoading(loading: boolean) {
+        this.loading = loading;
+        this.sendData();
+    }
+
+    private sendData() {
+        if (this.panel) {
+            this.panel.webview.postMessage({
+                command: 'data',
+                symbols: this.lastSymbols,
+                filter: this.lastFilter,
+                kindMap: this.kindMap,
+                version: this.version,
+                loading: this.loading
+            });
+        }
+    }
+
+    private getReactHtml(): string {
+        const webview = this.panel!.webview;
+        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'webview.js'));
+        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'style.css'));
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Project Symbol Explorer</title>
-    <style>
-        html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
-        body { background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); }
-        #toolbar { position: absolute; top: 10px; left: 10px; z-index: 10; }
-        #canvas { width: 100vw; height: 100vh; display: block; background: transparent; cursor: grab; }
-    </style>
+    <link rel="stylesheet" type="text/css" href="${styleUri}">
 </head>
 <body>
-    <div id="toolbar">
-        <button id="themeBtn">Toggle Theme</button>
-        <label style="margin-left:1em;">Zoom: <span id="zoomVal">1.0</span>x</label>
-    </div>
-    <canvas id="canvas"></canvas>
+    <div id="root"></div>
     <script>
-    const vscode = acquireVsCodeApi();
-    let theme = 'light';
-    let dragging = false, lastX = 0, lastY = 0, offsetX = 0, offsetY = 0, scale = 1;
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    let symbols = ${symbolsJson};
-    var kindMap = {
-        0: 'File', 1: 'Module', 2: 'Namespace', 3: 'Package', 4: 'Class', 5: 'Method', 6: 'Property', 7: 'Field', 8: 'Constructor', 9: 'Enum', 10: 'Interface', 11: 'Function', 12: 'Variable', 13: 'Constant', 14: 'String', 15: 'Number', 16: 'Boolean', 17: 'Array', 18: 'Object', 19: 'Key', 20: 'Null', 21: 'EnumMember', 22: 'Struct', 23: 'Event', 24: 'Operator', 25: 'TypeParameter'
-    };
-    function resize() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-        draw();
-    }
-    window.addEventListener('resize', resize);
-    function draw() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.save();
-        ctx.translate(offsetX, offsetY);
-        ctx.scale(scale, scale);
-        let y = 40;
-        for (var i = 0; i < symbols.length; i++) {
-            var s = symbols[i];
-            ctx.font = '16px sans-serif';
-            ctx.fillStyle = theme === 'dark' ? '#fff' : '#222';
-            var text = s.name + ' (' + (kindMap[s.kind] || s.kind) + (s.containerName ? ' in ' + s.containerName : '') + ')';
-            var padding = 10;
-            var textWidth = ctx.measureText(text).width;
-            var boxHeight = 28;
-            ctx.beginPath();
-            ctx.moveTo(30, y - 18);
-            ctx.lineTo(30 + textWidth + padding * 2, y - 18);
-            ctx.quadraticCurveTo(30 + textWidth + padding * 2 + 8, y - 18, 30 + textWidth + padding * 2 + 8, y - 18 + boxHeight / 2);
-            ctx.lineTo(30 + textWidth + padding * 2 + 8, y - 18 + boxHeight);
-            ctx.quadraticCurveTo(30 + textWidth + padding * 2 + 8, y - 18 + boxHeight + 8, 30 + textWidth + padding * 2, y - 18 + boxHeight + 8);
-            ctx.lineTo(30, y - 18 + boxHeight + 8);
-            ctx.quadraticCurveTo(22, y - 18 + boxHeight + 8, 22, y - 18 + boxHeight,);
-            ctx.lineTo(22, y - 18 + boxHeight / 2);
-            ctx.quadraticCurveTo(22, y - 18, 30, y - 18);
-            ctx.closePath();
-            ctx.fillStyle = theme === 'dark' ? '#333' : '#f3f3f3';
-            ctx.fill();
-            ctx.strokeStyle = theme === 'dark' ? '#888' : '#bbb';
-            ctx.stroke();
-            ctx.fillStyle = theme === 'dark' ? '#fff' : '#222';
-            ctx.fillText(text, 30 + padding, y);
-            y += 48;
-        }
-        ctx.restore();
-        document.getElementById('zoomVal').textContent = scale.toFixed(2);
-    }
-    canvas.addEventListener('mousedown', function(e) {
-        dragging = true;
-        lastX = e.clientX;
-        lastY = e.clientY;
-        canvas.style.cursor = 'grabbing';
-    });
-    window.addEventListener('mouseup', function() {
-        dragging = false;
-        canvas.style.cursor = 'grab';
-    });
-    window.addEventListener('mousemove', function(e) {
-        if (dragging) {
-            offsetX += e.clientX - lastX;
-            offsetY += e.clientY - lastY;
-            lastX = e.clientX;
-            lastY = e.clientY;
-            draw();
-        }
-    });
-    canvas.addEventListener('wheel', function(e) {
-        if (e.ctrlKey) {
-            e.preventDefault();
-            var prevScale = scale;
-            scale += e.deltaY * -0.001;
-            scale = Math.min(Math.max(0.2, scale), 3);
-            var mx = e.offsetX, my = e.offsetY;
-            offsetX = mx - ((mx - offsetX) * (scale / prevScale));
-            offsetY = my - ((my - offsetY) * (scale / prevScale));
-            draw();
-        }
-    }, { passive: false });
-    document.getElementById('themeBtn').onclick = function() {
-        theme = theme === 'dark' ? 'light' : 'dark';
-        document.body.style.background = theme === 'dark' ? '#222' : '#fff';
-        document.body.style.color = theme === 'dark' ? '#fff' : '#222';
-        draw();
-    };
-    window.addEventListener('message', function(event) {
-        if (event.data.command === 'setTheme') {
-            theme = event.data.theme === 2 ? 'dark' : 'light';
-            document.body.style.background = theme === 'dark' ? '#222' : '#fff';
-            document.body.style.color = theme === 'dark' ? '#fff' : '#222';
-            draw();
-        }
-    });
-    vscode.postMessage({ command: 'getTheme' });
-    resize();
+    // Polyfill for VS Code API
+    window.acquireVsCodeApi = acquireVsCodeApi;
     </script>
+    <script src="${scriptUri}"></script>
 </body>
 </html>`;
     }
