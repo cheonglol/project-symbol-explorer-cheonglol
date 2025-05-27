@@ -1,9 +1,6 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
-import { minimatch } from 'minimatch';
-import * as fs from 'fs';
-import * as path from 'path';
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -40,6 +37,19 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.workspace.onDidCreateFiles(() => refreshSymbols(provider)),
 		vscode.workspace.onDidDeleteFiles(() => refreshSymbols(provider))
 	);
+
+	// Register commands to open the view and show hello world
+	context.subscriptions.push(
+		vscode.commands.registerCommand('project-symbol-explorer-cheonglol.helloWorld', () => {
+			vscode.window.showInformationMessage('Hello World from Project Symbol Explorer!');
+		}),
+		vscode.commands.registerCommand('project-symbol-explorer-cheonglol.toggleSymbolExplorer', () => {
+			// Reveal the view in the sidebar
+			vscode.commands.executeCommand('workbench.view.extension.projectSymbolExplorerContainer');
+			// Optionally, also reveal the view itself
+			vscode.commands.executeCommand('projectSymbolExplorerView.focus');
+		})
+	);
 }
 
 // This method is called when your extension is deactivated
@@ -47,86 +57,21 @@ export function deactivate() {}
 
 // --- Drastic Refactor for Maintainability, Performance, and UX ---
 
-// 1. SymbolScanner: Use workspace symbol provider for performance, add filtering, and error handling
-// 2. SymbolPanel: Use a modern, accessible HTML UI with native scrolling, search/filter, and better state management
-// 3. Remove canvas-based rendering in favor of semantic HTML for accessibility and easier maintenance
-// 4. Add a search box for filtering symbols in the webview
-// 5. Use a table or list for symbol display
-// 6. Add error handling and loading state
-
+// SymbolScanner: Use workspace symbol provider for performance, add filtering, and error handling
 class SymbolScanner {
-    private gitignorePatterns: string[] = [];
-    private gitignoreLoaded = false;
-
-    private loadGitignore(workspaceRoot: string) {
-        if (this.gitignoreLoaded) { return; }
-        const gitignorePath = path.join(workspaceRoot, '.gitignore');
-        if (fs.existsSync(gitignorePath)) {
-            const lines = fs.readFileSync(gitignorePath, 'utf-8')
-                .split(/\r?\n/)
-                .map(line => line.trim())
-                .filter(line => line && !line.startsWith('#'));
-            this.gitignorePatterns = lines;
-        }
-        this.gitignoreLoaded = true;
-    }
-
     async getAllSymbols(query: string = ""): Promise<{name: string, kind: number, containerName: string, usedBy?: string[]}[]> {
         try {
-            // Get workspace root
-            const workspaceFolders = vscode.workspace.workspaceFolders;
-            const workspaceRoot = workspaceFolders && workspaceFolders.length > 0 ? workspaceFolders[0].uri.fsPath : '';
-            if (workspaceRoot) { this.loadGitignore(workspaceRoot); }
-
-            const symbols = await vscode.commands.executeCommand<any[]>(
-                'vscode.executeWorkspaceSymbolProvider', query
+            // Use the workspace symbol provider for performance
+            const all = await vscode.commands.executeCommand<any[]>(
+                'vscode.executeWorkspaceSymbolProvider', query || ''
             );
-            if (!Array.isArray(symbols)) { return []; }
-            // Filter to only project files (ts, js, tsx, jsx) and not excluded by .gitignore
-            const filteredSymbols = symbols.filter(s => {
-                if (!s.location || !s.location.uri) { return false; }
-                const file = s.location.uri.fsPath;
-                if (!/\.(ts|js|tsx|jsx)$/i.test(file)) { return false; }
-                // Exclude if matches any .gitignore pattern
-                if (this.gitignorePatterns.length > 0) {
-                    const relPath = workspaceRoot ? path.relative(workspaceRoot, file).replace(/\\/g, '/') : file;
-                    for (const pattern of this.gitignorePatterns) {
-                        if (minimatch(relPath, pattern, { dot: true })) { return false; }
-                    }
-                }
-                return true;
-            });
-            // Build a map of symbol name to symbol info
-            const symbolMap = new Map<string, any>();
-            filteredSymbols.forEach(s => {
-                symbolMap.set(s.name, s);
-            });
-            // For each symbol, find who uses it (Used By)
-            const usedByMap: Record<string, Set<string>> = {};
-            for (const s of filteredSymbols) {
-                if (!s.location) { continue; }
-                const refs = await vscode.commands.executeCommand<any[]>(
-                    'vscode.executeReferenceProvider', s.location.uri, s.location.range.start
-                );
-                if (Array.isArray(refs)) {
-                    for (const ref of refs) {
-                        // Find which symbol this reference belongs to
-                        for (const other of filteredSymbols) {
-                            if (other.location &&
-                                other.location.uri.fsPath === ref.uri.fsPath &&
-                                other.location.range.contains(ref.range)) {
-                                if (!usedByMap[s.name]) { usedByMap[s.name] = new Set(); }
-                                usedByMap[s.name].add(other.name);
-                            }
-                        }
-                    }
-                }
-            }
-            return filteredSymbols.map(s => ({
+            if (!Array.isArray(all)) { return []; }
+            // Flatten and normalize
+            return all.map(s => ({
                 name: s.name,
                 kind: s.kind,
                 containerName: s.containerName || '',
-                usedBy: usedByMap[s.name] ? Array.from(usedByMap[s.name]) : []
+                usedBy: [],
             }));
         } catch (e: any) {
             vscode.window.showErrorMessage('Failed to scan symbols: ' + (e && e.message ? e.message : String(e)));

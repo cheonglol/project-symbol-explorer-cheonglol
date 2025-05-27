@@ -11,19 +11,14 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:project-symbol-explorer-cheonglol.toggleSymbolExplorer",
-    "onCommand:project-symbol-explorer-cheonglol.helloWorld"
+    "onCommand:project-symbol-explorer-cheonglol.toggleSymbolExplorer"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "project-symbol-explorer-cheonglol.helloWorld",
-        "title": "Hello World"
-      },
-      {
         "command": "project-symbol-explorer-cheonglol.toggleSymbolExplorer",
-        "title": "Open Project Symbol Explorer (Side Panel)"
+        "title": "Open Project Symbol Explorer"
       }
     ],
     "menus": {
