@@ -66,7 +66,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         {symbolCount} symbol{symbolCount === 1 ? "" : "s"}
       </span>
       {loading && (
-        <span id="loading" className="loading">Loading symbols...</span>
+        <span id="loading" className="loading">⌛</span>
       )}
       <span className="version-badge" title="Extension version" style={{ marginLeft: "auto" }}>
         v{version}
